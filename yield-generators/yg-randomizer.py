@@ -19,8 +19,6 @@ txfee = 1000            # [satoshis, any integer] / the average transaction fee 
 txfee_factor = 0.2      # [percent, 0-1] / variance around the average fee. Ex: 1000 fee, 0.2 var = fee is btw 800-1200
 minsize = 500000        # [satoshis, any integer] / minimum size of your cj offer. Lower cj amounts will be disregarded
 size_factor = 0.1       # [percent, 0-1] / variance around all offer sizes. Ex: 500k minsize, 0.1 var = 450k-550k
-mix_levels = 5          # [mixlevels, any integer] / number of mixlevels your wallet is set up to us. Default 5.
-nickserv_password = ''
 gaplimit = 6
 
 
@@ -54,8 +52,8 @@ class YieldGeneratorRandomize(YieldGenerator):
         mix_balance = dict([(m, b) for m, b in mix_balance.iteritems()
                             if b > self.minsize])
         if len(mix_balance) == 0:
-            log.error('You do not have any coins left. Cannot be an active '
-                      'maker with no funds.')
+            log.error('You do not have the minimum required amount of coins'
+                      ' to be a maker: ' + str(minsize))
             return []
         max_mix = max(mix_balance, key=mix_balance.get)
 
@@ -203,6 +201,6 @@ class YieldGeneratorRandomize(YieldGenerator):
 if __name__ == "__main__":
     ygmain(YieldGeneratorRandomize, txfee=txfee,
            cjfee_a=cjfee_a, cjfee_r=cjfee_r,
-           ordertype=ordertype, nickserv_password=nickserv_password,
-           minsize=minsize, mix_levels=mix_levels, gaplimit=gaplimit)
+           ordertype=ordertype, nickserv_password='',
+           minsize=minsize, gaplimit=gaplimit)
     print('done')
