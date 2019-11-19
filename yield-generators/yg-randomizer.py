@@ -1,13 +1,15 @@
 #! /usr/bin/env python
-from __future__ import print_function
+from __future__ import (absolute_import, division,
+                        print_function, unicode_literals)
+from builtins import * # noqa: F401
+from future.utils import iteritems
 
 import datetime
 import time
 import random
 
-from joinmarket import jm_single
-from joinmarket import get_log, calc_cj_fee
-from joinmarket import YieldGenerator, ygmain
+from jmbase import get_log
+from jmclient import jm_single, calc_cj_fee, YieldGeneratorBasic, ygmain
 
 # User settings
 
@@ -29,15 +31,13 @@ log = get_log()
 # This is primarily attempted by randomizing all aspects of orders
 # after transactions wherever possible.
 
-class YieldGeneratorRandomize(YieldGenerator):
+class YieldGeneratorRandomize(YieldGeneratorBasic):
 
-    def __init__(self, msgchan, wallet, offerconfig):
-        self.txfee, self.cjfee_a, self.cjfee_r, self.ordertype, self.minsize, \
-            self.mix_levels = offerconfig
-        super(YieldGeneratorRandomize, self).__init__(msgchan, wallet)
+    def __init__(self, wallet, offerconfig):
+        super(YieldGeneratorRandomize, self).__init__(wallet, offerconfig)
 
     def create_my_orders(self):
-        mix_balance = self.wallet.get_balance_by_mixdepth()
+        mix_balance = self.get_available_mixdepths()
         # We publish ONLY the maximum amount and use minsize for lower bound;
         # leave it to oid_to_order to figure out the right depth to use.
         f = '0'
@@ -49,8 +49,8 @@ class YieldGeneratorRandomize(YieldGenerator):
                 int(1.5 * self.txfee / float(self.cjfee_r)), self.minsize)
         elif ordertype == 'absoffer':
             f = str(self.txfee + self.cjfee_a)
-        mix_balance = dict([(m, b) for m, b in mix_balance.iteritems()
-                            if b > self.minsize])
+        mix_balance = {m: b for m, b in iteritems(mix_balance)
+                            if b > self.minsize}
         if len(mix_balance) == 0:
             log.error('You do not have the minimum required amount of coins'
                       ' to be a maker: ' + str(minsize))
@@ -93,109 +93,43 @@ class YieldGeneratorRandomize(YieldGenerator):
 
         return [order]
 
-    def oid_to_order(self, cjorder, oid, amount):
-        """The only change from *basic here (for now) is that
-        we choose outputs to avoid increasing the max_mixdepth
-        as much as possible, thus avoiding reannouncement as
-        much as possible.
-        """
-        total_amount = amount + cjorder.txfee
-        mix_balance = self.wallet.get_balance_by_mixdepth()
-        max_mix = max(mix_balance, key=mix_balance.get)
-        min_mix = min(mix_balance, key=mix_balance.get)
+    def select_input_mixdepth(self, available, offer, amount):
+        """Selects the input mixdepth such that we avoid spending from
+        the maximum amount one if possible.  If there are multiple choices
+        left, choose randomly.
 
-        filtered_mix_balance = [m
-                                for m in mix_balance.iteritems()
-                                if m[1] >= total_amount]
-        if not filtered_mix_balance:
-            return None, None, None
+        The rationale for this is that we want to avoid having to reannounce
+        offers as much as possible.  When we reduce the maximum amount, we have
+        to do so."""
 
-        log.debug('mix depths that have enough = ' + str(filtered_mix_balance))
-
-        # Avoid the max mixdepth wherever possible, to avoid changing the
-        # offer. Algo:
-        #"mixdepth" is the mixdepth we are spending FROM, so it is also
-        # the destination of change.
-        #"cjoutdepth" is the mixdepth we are sending coinjoin out to.
-        #
-        # Find a mixdepth, in the set that have enough, which is
-        # not the maximum, and choose any from that set as "mixdepth".
-        # If not possible, it means only the max_mix depth has enough,
-        # so must choose "mixdepth" to be that.
-        # To find the cjoutdepth: ensure that max != min, if so it means
-        # we had only one depth; in that case, just set "cjoutdepth"
-        # to the next mixdepth. Otherwise, we set "cjoutdepth" to the minimum.
+        max_mix = max(available, key=mix_balance.get)
 
         nonmax_mix_balance = [
-            m for m in filtered_mix_balance if m[0] != max_mix]
+            m for m, b in iteritems(available) if m != max_mix]
         if not nonmax_mix_balance:
             log.debug("Could not spend from a mixdepth which is not max")
-            mixdepth = max_mix
-        else:
-            mixdepth = nonmax_mix_balance[0][0]
-        log.info('filling offer, mixdepth=' + str(mixdepth))
+            return max_mix
 
-        # mixdepth is the chosen depth we'll be spending from
-        # min_mixdepth is the one we want to send our cjout TO,
-        # to minimize chance of it becoming the largest, and reannouncing
-        # offer.
-        if mixdepth == min_mix:
-            cjoutmix = (mixdepth + 1) % self.wallet.max_mix_depth
-            # don't send cjout to max
-            if cjoutmix == max_mix:
-                cjoutmix = (cjoutmix + 1) % self.wallet.max_mix_depth
-        else:
-            cjoutmix = min_mix
-        cj_addr = self.wallet.get_internal_addr(cjoutmix)
-        change_addr = self.wallet.get_internal_addr(mixdepth)
+        return random.choice(nonmax_mix_balance)
 
-        utxos = self.wallet.select_utxos(mixdepth, total_amount)
-        my_total_in = sum([va['value'] for va in utxos.values()])
-        real_cjfee = calc_cj_fee(cjorder.ordertype, cjorder.cjfee, amount)
-        change_value = my_total_in - amount - cjorder.txfee + real_cjfee
-        if change_value <= jm_single().DUST_THRESHOLD:
-            log.debug(('change value={} below dust threshold, '
-                       'finding new utxos').format(change_value))
-            try:
-                utxos = self.wallet.select_utxos(
-                    mixdepth, total_amount + jm_single().DUST_THRESHOLD)
-            except Exception:
-                log.info('dont have the required UTXOs to make a '
-                          'output above the dust threshold, quitting. '
-                          'This can sometimes happen and does not require user action.')
-                return None, None, None
+    def select_output_address(self, input_mixdepth, offer, amount):
+        """Selects the output mixdepth.  We try to choose the one with the
+        smallest possible balance, to reduce the possibility of making it the
+        new largest and having to reannounce offers."""
 
-        return utxos, cj_addr, change_addr
+        # Get all mixdepths that are available as output, i.e. that excluding
+        # the input.
+        balances = self.wallet.get_balance_by_mixdepth(verbose=False)
+        balances = {m: b for m, b in iteritems(balances) if m != input_mixdepth)
 
-    def on_tx_unconfirmed(self, cjorder, txid, removed_utxos):
-        self.tx_unconfirm_timestamp[cjorder.cj_addr] = int(time.time())
-        # if the balance of the highest-balance mixing depth change then
-        # reannounce it
-        oldorder = self.orderlist[0] if len(self.orderlist) > 0 else None
-        neworders = self.create_my_orders()
-        if len(neworders) == 0:
-            return [0], []  # cancel old order
-        # oldorder may not exist when this is called from on_tx_confirmed
-        # (this happens when we just spent from the max mixdepth and so had
-        # to cancel the order).
-        if oldorder:
-            if oldorder['maxsize'] == neworders[0]['maxsize']:
-                return [], []  # change nothing
-        # announce new order, replacing the old order
-        return [], [neworders[0]]
+        if not balances:
+            return None
 
-    def on_tx_confirmed(self, cjorder, confirmations, txid):
-        if cjorder.cj_addr in self.tx_unconfirm_timestamp:
-            confirm_time = int(time.time()) - self.tx_unconfirm_timestamp[
-                cjorder.cj_addr]
-        else:
-            confirm_time = 0
-        timestamp = datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        self.log_statement([timestamp, cjorder.cj_amount, len(
-            cjorder.utxos), sum([av['value'] for av in cjorder.utxos.values(
-            )]), cjorder.real_cjfee, cjorder.real_cjfee - cjorder.txfee, round(
-                confirm_time / 60.0, 2), ''])
-        return self.on_tx_unconfirmed(cjorder, txid, None)
+        # From the options, pick the one with minimum current balance.
+        balances = sorted(iteritems(balances), key=lambda entry: entry[1])
+        cjoutmix = balances[0][0]
+
+        return self.wallet.get_internal_addr(cjoutmix, jm_single().bc_interface)
 
 
 if __name__ == "__main__":
@@ -203,4 +137,4 @@ if __name__ == "__main__":
            cjfee_a=cjfee_a, cjfee_r=cjfee_r,
            ordertype=ordertype, nickserv_password='',
            minsize=minsize, gaplimit=gaplimit)
-    print('done')
+    jmprint('done', "success")
