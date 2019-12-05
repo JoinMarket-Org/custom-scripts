@@ -23,13 +23,13 @@ class YieldGeneratorAcyclic(YieldGeneratorBasic):
     Instead, it lets funds accumulate there, so that they can then be manually
     sent elsewhere as needed."""
 
-    def __init__(self, wallet, offerconfig):
-        super(YieldGeneratorAcyclic, self).__init__(wallet, offerconfig)
+    def __init__(self, wallet_service, offerconfig):
+        super(YieldGeneratorAcyclic, self).__init__(wallet_service, offerconfig)
 
     def get_available_mixdepths(self):
-        balances = self.wallet.get_balance_by_mixdepth(verbose=False)
+        balances = self.wallet_service.get_balance_by_mixdepth(verbose=False)
         return {m: b for m, b in iteritems(balances)
-                     if m < self.wallet.mixdepth}
+                     if m < self.wallet_service.mixdepth}
 
 
 if __name__ == "__main__":
