@@ -7,14 +7,9 @@ from future.utils import iteritems
 from jmbase import jmprint
 from jmclient import YieldGeneratorBasic, ygmain
 
-# User settings
-txfee = 100
-cjfee_a = 500
-cjfee_r = '0.00002'
-ordertype = 'swreloffer'
-nickserv_password = ''
-minsize = 100000
-gaplimit = 6
+
+# YIELD GENERATOR SETTINGS ARE NOW IN YOUR joinmarket.cfg CONFIG FILE
+# (You can also use command line flags; see --help for this script).
 
 
 class YieldGeneratorAcyclic(YieldGeneratorBasic):
@@ -33,8 +28,5 @@ class YieldGeneratorAcyclic(YieldGeneratorBasic):
 
 
 if __name__ == "__main__":
-    ygmain(YieldGeneratorAcyclic, txfee=txfee,
-           cjfee_a=cjfee_a, cjfee_r=cjfee_r,
-           ordertype=ordertype, nickserv_password=nickserv_password,
-           minsize=minsize, gaplimit=gaplimit)
+    ygmain(YieldGeneratorAcyclic, nickserv_password='')
     jmprint('done', "success")
