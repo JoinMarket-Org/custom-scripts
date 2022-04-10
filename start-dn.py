@@ -6,9 +6,10 @@ from optparse import OptionParser
 from jmbase import get_log, commands
 from jmclient import (Maker, jm_single, load_program_config,
                       JMClientProtocolFactory, start_reactor,
-                      add_base_options, JMMakerClientProtocol)
+                      add_base_options, JMMakerClientProtocol,
+                      get_mchannels)
 import jmdaemon
-from jmbase.support import EXIT_ARGERROR
+from jmbase.support import EXIT_ARGERROR, JM_APP_NAME, JM_CORE_VERSION
 
 jlog = get_log()
 
@@ -75,14 +76,22 @@ def directory_node_startup():
     (options, args) = parser.parse_args()
     # for string access, convert to dict:
     options = vars(options)
-    if len(args) != 0:
-        parser.error('No arguments needed.')
+    if len(args) != 1:
+        parser.error('One argument required: string to be published in the MOTD of the directory node.')
         sys.exit(EXIT_ARGERROR)
-
+    operator_message = args[0]
     # It's possible to set `no-blockchain` in the config file, but this just
     # makes it easier for the user:
     load_program_config(config_path=options["datadir"], bs="no-blockchain")
-
+    # note: you *must* only have the onionmc, no IRC, for this to work,
+    # and of course you must only have your own d-node configured here:
+    mchan_config = get_mchannels()[0]
+    node_location = mchan_config["directory_nodes"]
+    # before starting, patch the server handshake default to include our MOTD customization
+    # default acceptance false; code must switch it on:
+    jmdaemon.onionmc.server_handshake_json[
+        "motd"] = "DIRECTORY NODE: {}\nJOINMARKET VERSION: {}\n{}".format(
+            node_location, JM_CORE_VERSION, operator_message)
     maker = DNMaker()
     jlog.info('starting directory node')
     clientfactory = DNJMClientProtocolFactory(maker, proto_type="MAKER")
